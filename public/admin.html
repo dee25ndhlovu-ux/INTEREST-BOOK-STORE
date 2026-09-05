@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="login" id="loginView" hidden>
+  <div class="panel">
+    <h1>Admin</h1>
+    <p class="sub muted">Enter your password to continue.</p>
+    <p class="error" id="loginError" hidden></p>
+    <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
+    <button class="btn primary full" id="loginBtn">Sign in</button>
+  </div>
+</div>
+
+<div class="shell" id="adminView" hidden>
+  <aside class="side">
+    <div class="brand"><span class="brand-mark">A</span>Admin</div>
+    <button class="nav active" data-view="products">Products</button>
+    <button class="nav" data-view="categories">Categories</button>
+    <button class="nav" data-view="orders">Orders</button>
+    <button class="nav" data-view="settings">Settings</button>
+    <div class="spacer"></div>
+    <a href="/" target="_blank">View store ↗</a>
+    <button class="nav" id="logoutBtn" hidden>Sign out</button>
+  </aside>
+
+  <section class="content">
+    <p class="notice" id="noPassNotice" hidden>The admin panel has no password yet, so anyone with this link can change your store. Set one under Settings.</p>
+    <p class="notice" id="demoNotice" hidden>Demo mode is on: payments are simulated and no money moves. Turn it off in Render (DEMO_MODE=false) when you go live.</p>
+
+    <!-- Products -->
+    <div data-panel="products">
+      <h1>Products</h1>
+      <p class="sub">Each product is a PDF with a cover, price and optional category.</p>
+      <div class="panel">
+        <h2 id="prodFormTitle">Add a product</h2>
+        <p class="error" id="prodError" hidden></p>
+        <label>Title<input id="pTitle" type="text"></label>
+        <label>Description<textarea id="pDesc"></textarea></label>
+        <div class="two">
+          <label>Price (USD)<input id="pPrice" type="number" min="0.5" step="0.01"></label>
+          <label>Category<select id="pCat"><option value="">None</option></select></label>
+        </div>
+        <div class="two">
+          <label>PDF file<input id="pPdf" type="file" accept="application/pdf"><small id="pPdfHint">The master file customers pay for.</small></label>
+          <label>Cover image<input id="pCover" type="file" accept="image/png,image/jpeg,image/webp"><small>Portrait works best (3:4). PNG, JPG or WebP.</small></label>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn primary" id="prodSave">Add product</button>
+          <button class="btn ghost" id="prodCancel" hidden>Cancel</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Listed</h2>
+        <table><thead><tr><th></th><th>Title</th><th>Category</th><th>Price</th><th>Visible</th><th></th></tr></thead><tbody id="prodList"></tbody></table>
+      </div>
+    </div>
+
+    <!-- Categories -->
+    <div data-panel="categories" hidden>
+      <h1>Categories</h1>
+      <p class="sub">Group your titles. Categories only appear on the store once a product uses them.</p>
+      <div class="panel">
+        <p class="error" id="catError" hidden></p>
+        <div class="inline"><label>New category<input id="catName" type="text" placeholder="e.g. Tax law"></label><button class="btn primary" id="catAdd">Add</button></div>
+      </div>
+      <div class="panel"><h2>Existing</h2><div class="tag-list" id="catList"></div></div>
+    </div>
+
+    <!-- Orders -->
+    <div data-panel="orders" hidden>
+      <h1>Orders</h1>
+      <p class="sub">Orders since the server last started. Delivered means the watermarked PDF was emailed.</p>
+      <div class="panel">
+        <table><thead><tr><th>Ref</th><th>Buyer</th><th>Title</th><th>Amount</th><th>Status</th><th>Time</th></tr></thead><tbody id="orderList"></tbody></table>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div data-panel="settings" hidden>
+      <h1>Settings</h1>
+      <p class="sub">Store identity and admin access.</p>
+      <div class="panel">
+        <h2>Store</h2>
+        <label>Store name<input id="sName" type="text"></label>
+        <label>Tagline<input id="sTagline" type="text" placeholder="Shown under the store name on the home page"></label>
+        <button class="btn primary" id="sSave">Save</button> <span class="muted" id="sSaved" hidden>Saved.</span>
+      </div>
+      <div class="panel">
+        <h2 id="pwTitle">Set admin password</h2>
+        <p class="error" id="pwError" hidden></p>
+        <label id="pwCurrentWrap" hidden>Current password<input id="pwCurrent" type="password" autocomplete="current-password"></label>
+        <label>New password<input id="pwNext" type="password" autocomplete="new-password"><small>At least 6 characters.</small></label>
+        <button class="btn primary" id="pwSave">Save password</button> <span class="ok" id="pwSaved" hidden>Password saved.</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="/admin.js"></script>
+</body>
+</html>

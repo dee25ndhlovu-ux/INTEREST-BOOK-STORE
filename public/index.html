@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Store</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark" id="mark">S</span><span id="brandName">Store</span></a>
+    <nav><a href="#books">Books</a><a href="#how">How it works</a></nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <h1 id="heroTitle">Loading…</h1>
+    <p id="heroTagline"></p>
+  </section>
+
+  <div class="filters" id="filters" hidden></div>
+
+  <section id="books" aria-live="polite"></section>
+
+  <section id="how" class="how">
+    <div><b>Choose a title</b><span>Enter your name, email and EcoCash number.</span></div>
+    <div><b>Approve on your phone</b><span>A prompt appears on your phone. Enter your EcoCash PIN.</span></div>
+    <div><b>Check your inbox</b><span>Your PDF arrives by email, licensed to you with your name on every page.</span></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>© <span id="year"></span> <span id="footName"></span></span>
+  <span>Payments processed by Paynow</span>
+</footer>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="drawer" role="dialog" aria-modal="true">
+    <button class="close" id="closeBtn" aria-label="Close">×</button>
+
+    <div class="drawer-head">
+      <div class="thumb" id="dThumb"></div>
+      <div><h2 id="dTitle"></h2><p class="price" id="dPrice"></p></div>
+    </div>
+
+    <div id="stepForm">
+      <label>Full name<input id="fName" type="text" autocomplete="name"></label>
+      <label>Email address<input id="fEmail" type="email" autocomplete="email"><small>Your PDF is sent here.</small></label>
+      <label>EcoCash number<input id="fPhone" type="tel" inputmode="numeric" placeholder="0771234567"></label>
+      <p class="error" id="formError" hidden></p>
+      <button class="btn primary full" id="payBtn">Pay with EcoCash</button>
+      <p class="fine">You'll get a prompt on your phone. Enter your PIN to approve.</p>
+    </div>
+
+    <div id="stepWait" hidden>
+      <div class="status"><span class="dot"></span>
+        <div><p class="status-title">Waiting for your approval</p>
+          <p class="muted" id="waitMsg"></p>
+          <p class="muted">Order <span class="mono" id="waitRef"></span></p></div>
+      </div>
+    </div>
+
+    <div id="stepDone" hidden>
+      <p class="status-title ok">Sent to <span id="doneEmail"></span></p>
+      <p class="muted">Check your inbox and spam folder. Order <span class="mono" id="doneRef"></span>.</p>
+      <p id="previewWrap" hidden style="margin-top:16px"><a class="btn ghost" id="previewLink" target="_blank" rel="noopener">Open test email preview</a></p>
+      <button class="btn primary full" id="doneBtn" style="margin-top:22px">Done</button>
+    </div>
+
+    <div id="stepFail" hidden>
+      <p class="status-title">Payment not completed</p>
+      <p class="muted" id="failMsg"></p>
+      <button class="btn primary full" id="retryBtn" style="margin-top:22px">Try again</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
