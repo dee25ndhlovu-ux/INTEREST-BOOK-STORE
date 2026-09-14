@@ -1,0 +1,9 @@
+node_modules/
+.env
+
+# Ephemeral local storage from the current pre-database setup (see README) —
+# being replaced by Postgres + R2, but ignored either way since none of this
+# should ever be committed.
+data/
+files/
+uploads/

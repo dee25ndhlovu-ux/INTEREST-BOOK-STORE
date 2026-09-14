@@ -3,9 +3,18 @@
   "version": "2.0.0",
   "description": "Sell PDFs via EcoCash (Paynow) with per-buyer watermarking and email delivery",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1132.0",
+    "@prisma/client": "^7.10.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
@@ -13,5 +22,8 @@
     "nodemailer": "^6.9.14",
     "paynow": "^1.0.7",
     "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.0"
   }
 }
