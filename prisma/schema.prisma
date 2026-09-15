@@ -10,9 +10,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Prisma 7 removed `url` from this block — the connection string now lives
+// in prisma.config.js (for the CLI/migrations) and is passed to PrismaClient
+// via a driver adapter at runtime (see db.js). This block just declares the
+// database kind.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------- accounts ----------
