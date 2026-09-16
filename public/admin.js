@@ -63,23 +63,31 @@ $("catName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("catA
 const catName = (id) => (cats.find((c) => c.id === id) || {}).name || "—";
 async function loadProducts() {
   const list = await api("/api/admin/products");
+  const renderBadge = (p) => {
+    if (p.renderStatus === "READY") return `<span class="muted">Ready${p.pageCount ? ` · ${p.pageCount}p` : ""}</span>`;
+    if (p.renderStatus === "FAILED") return `<span class="muted" title="Try re-uploading the PDF">Failed</span>`;
+    return `<span class="muted">Processing…</span>`;
+  };
   $("prodList").innerHTML = list.length ? list.map((p) => `
     <tr>
       <td>${p.cover ? `<img class="thumb-sm" src="${esc(p.cover)}" alt="">` : `<span class="thumb-sm"></span>`}</td>
       <td>${esc(p.title)}</td>
       <td class="muted">${esc(catName(p.categoryId))}</td>
       <td class="price">${money(p.price)}</td>
+      <td>${renderBadge(p)}</td>
       <td><button class="btn ghost sm" data-toggle="${esc(p.id)}" data-pub="${p.published !== false}">${p.published !== false ? "Yes" : "No"}</button></td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-edit="${esc(p.id)}">Edit</button> <button class="btn danger sm" data-del="${esc(p.id)}">Delete</button></td>
-    </tr>`).join("") : `<tr><td colspan="6" class="muted">No products yet. Add your first one above.</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="7" class="muted">No products yet. Add your first one above.</td></tr>`;
 
   $("prodList").querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
     if (!confirm("Delete this product? Buyers who already received it are unaffected.")) return;
-    await api(`/api/admin/products/${b.dataset.del}`, { method: "DELETE" }); loadProducts();
+    try { await api(`/api/admin/products/${b.dataset.del}`, { method: "DELETE" }); loadProducts(); }
+    catch (e) { alert(e.message); }
   });
   $("prodList").querySelectorAll("[data-toggle]").forEach((b) => b.onclick = async () => {
     const fd = new FormData(); fd.append("published", b.dataset.pub === "true" ? "false" : "true");
-    await api(`/api/admin/products/${b.dataset.toggle}`, { method: "PUT", body: fd }); loadProducts();
+    try { await api(`/api/admin/products/${b.dataset.toggle}`, { method: "PUT", body: fd }); loadProducts(); }
+    catch (e) { alert(e.message); }
   });
   $("prodList").querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => startEdit(list.find((p) => p.id === b.dataset.edit)));
 }

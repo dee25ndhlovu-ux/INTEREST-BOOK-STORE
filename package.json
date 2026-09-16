@@ -23,7 +23,8 @@
     "nodemailer": "^6.9.14",
     "paynow": "^1.0.7",
     "pdf-lib": "^1.17.1",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "prisma": "^7.10.0"

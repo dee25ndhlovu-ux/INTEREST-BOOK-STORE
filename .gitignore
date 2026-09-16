@@ -1,9 +1,10 @@
 node_modules/
 .env
 
-# Ephemeral local storage from the current pre-database setup (see README) —
-# being replaced by Postgres + R2, but ignored either way since none of this
-# should ever be committed.
+# data/ holds settings.json (store name/admin password) — still local disk,
+# see the "Known gaps" section of the README. files/ and uploads/ are dead
+# now that master PDFs, covers and rendered pages all live in R2, kept
+# ignored in case anything ever writes there locally again.
 data/
 files/
 uploads/

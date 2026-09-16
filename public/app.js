@@ -77,7 +77,10 @@ $("payBtn").onclick = async () => {
   $("payBtn").disabled = true; $("formError").hidden = true;
   try {
     const res = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: current.id, name: $("fName").value.trim(), email: $("fEmail").value.trim(), phone: $("fPhone").value.trim() }) });
+      body: JSON.stringify({
+        productId: current.id, name: $("fName").value.trim(), email: $("fEmail").value.trim(), phone: $("fPhone").value.trim(),
+        username: $("fUsername").value.trim(), password: $("fPassword").value,
+      }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Something went wrong.");
     $("waitRef").textContent = data.ref; $("waitMsg").textContent = data.instructions;
