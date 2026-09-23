@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creator</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="login" id="loginView" hidden>
+  <div class="panel">
+    <h1>Creator sign in</h1>
+    <p class="sub muted">First time here? Enter your username and choose a password — it's set right then.</p>
+    <p class="error" id="loginError" hidden></p>
+    <label>Username<input id="loginUser" type="text" autocomplete="username"></label>
+    <label>Password<input id="loginPass" type="password" autocomplete="current-password"><small>At least 6 characters.</small></label>
+    <button class="btn primary full" id="loginBtn">Sign in</button>
+  </div>
+</div>
+
+<div class="shell" id="creatorView" hidden>
+  <aside class="side">
+    <div class="brand"><span class="brand-mark">C</span><span id="crWho">Creator</span></div>
+    <button class="nav active" data-view="products">My products</button>
+    <button class="nav" data-view="earnings">Earnings</button>
+    <div class="spacer"></div>
+    <button class="nav" id="logoutBtn">Sign out</button>
+  </aside>
+
+  <section class="content">
+    <!-- Products -->
+    <div data-panel="products">
+      <h1>My products</h1>
+      <p class="sub">Books assigned to you by the store admin, with your revenue split on each.</p>
+      <div class="panel">
+        <table><thead><tr><th></th><th>Title</th><th>Price</th><th>Your split</th><th>Visible</th></tr></thead><tbody id="prodList"></tbody></table>
+      </div>
+    </div>
+
+    <!-- Earnings -->
+    <div data-panel="earnings" hidden>
+      <h1>Earnings</h1>
+      <p class="sub">Your share of delivered orders on your products, recorded in this store's own data.</p>
+      <div class="meter">
+        <div><span class="meter-label">Total earned</span><span class="meter-value" id="earnTotal">US$0.00</span></div>
+      </div>
+      <div class="panel">
+        <table><thead><tr><th>Ref</th><th>Title</th><th>Sale amount</th><th>Your earning</th><th>Delivered</th></tr></thead><tbody id="earnList"></tbody></table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="/creator.js"></script>
+</body>
+</html>

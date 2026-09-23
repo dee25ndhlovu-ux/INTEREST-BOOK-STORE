@@ -8,8 +8,7 @@ const crypto = require("crypto");
 const { Paynow } = require("paynow");
 const { prisma } = require("./db");
 const { putObject, getObjectBuffer, deleteObject } = require("./storage");
-const { renderProduct, clearRenderedPages } = require("./render");
-const { watermarkPdf, watermarkPageImage } = require("./watermark");
+const { watermarkPdf } = require("./watermark");
 const { sendPdf } = require("./mailer");
 
 const app = express();
@@ -18,10 +17,9 @@ const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\
 const DEMO_MODE = process.env.DEMO_MODE === "true";
 
 // Only settings.json (store name/tagline, admin password) still lives on
-// local disk — it isn't part of the Postgres schema yet (build brief §8
-// doesn't model it). That means it's still subject to the exact ephemeral-
-// disk wipe the brief flagged for everything else: known gap, not fixed
-// here (see docs/closed-reader-build-brief.md).
+// local disk — it isn't part of the Postgres schema. That means it's still
+// subject to Render's ephemeral-disk wipe: known gap, not fixed here (see
+// docs/build-brief.md).
 const DATA = path.join(__dirname, "data");
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -57,14 +55,15 @@ function setPassword(pw) {
   db.write("settings", s);
 }
 
-// ---------- account passwords (build brief §8) ----------
-// Accounts only have one `passwordHash` column, so the salt is embedded in
-// it as "salt:hash" rather than stored separately like settings.json above.
-function hashAccountPassword(pw) {
+// ---------- creator passwords ----------
+// Same scheme as admin's settings.json password, but per-row: the salt is
+// embedded in the stored value as "salt:hash" since Creator only has one
+// passwordHash column.
+function hashCreatorPassword(pw) {
   const salt = crypto.randomBytes(16).toString("hex");
   return `${salt}:${crypto.scryptSync(pw, salt, 64).toString("hex")}`;
 }
-function verifyAccountPassword(pw, stored) {
+function verifyCreatorPassword(pw, stored) {
   const [salt, storedHash] = String(stored || "").split(":");
   if (!salt || !storedHash) return false;
   const candidate = crypto.scryptSync(pw, salt, 64).toString("hex");
@@ -72,7 +71,7 @@ function verifyAccountPassword(pw, stored) {
   catch { return false; }
 }
 
-const toNum = (decimal) => Number(decimal.toString());
+const toNum = (decimal) => (decimal === null || decimal === undefined ? null : Number(decimal.toString()));
 
 app.set("trust proxy", 1);
 app.use(express.json());
@@ -86,8 +85,8 @@ app.use(session({
 app.use(express.static(path.join(__dirname, "public")));
 
 // ---------- uploads ----------
-// Master PDFs, covers and rendered pages all go to R2 (storage.js), never to
-// local disk — Render's disk is wiped on restart/redeploy (README, brief §8).
+// Master PDFs and covers go to R2 (storage.js), never to local disk —
+// Render's disk is wiped on restart/redeploy (README).
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 60 * 1024 * 1024 },
@@ -105,12 +104,14 @@ function makePaynow() {
 }
 
 // ---------- fulfilment ----------
-// Ethereal test-inbox preview links (DEMO/no-SMTP mode) aren't part of the
-// Order schema — they're a dev convenience, not real order data, so they're
-// kept in memory only (same as before this migration, when *all* orders
-// were in-memory). Resets on restart; harmless.
-const emailPreviews = new Map();
-const fulfillingNow = new Set(); // re-entrancy guard now that fulfil() re-reads from the DB
+// Direct download replaces the closed reader: the watermarked PDF is
+// generated once at delivery time, saved to R2 under the order, and served
+// straight from the confirmation page. Email is a backup channel only and
+// must never block delivery — a failed send is logged, not fatal, and never
+// flips a delivered order back to FAILED (see spec: "must never block the
+// sale if it fails").
+const emailPreviews = new Map(); // dev convenience only (Ethereal preview links), not real order data
+const fulfillingNow = new Set(); // re-entrancy guard
 
 async function fulfil(orderId) {
   if (fulfillingNow.has(orderId)) return;
@@ -118,23 +119,40 @@ async function fulfil(orderId) {
   try {
     const order = await prisma.order.findUnique({ where: { id: orderId }, include: { product: true } });
     if (!order || order.status === "DELIVERED") return;
+
     const masterPdf = await getObjectBuffer(order.product.sourcePdfKey);
-    const pdf = await watermarkPdf(masterPdf, {
-      name: order.name, email: order.email, orderRef: order.ref, date: new Date().toISOString().slice(0, 10),
+    const date = new Date().toISOString().slice(0, 10);
+    const pdf = await watermarkPdf(masterPdf, { email: order.email, orderRef: order.ref, date });
+
+    const watermarkedPdfKey = `orders/${order.id}/delivery.pdf`;
+    await putObject(watermarkedPdfKey, pdf, "application/pdf");
+    const downloadToken = crypto.randomBytes(24).toString("hex");
+
+    const splitPct = Number(order.product.creatorSplitPct || 0);
+    const amount = Number(order.amount);
+    const creatorEarning = order.product.creatorId ? Math.round(amount * (splitPct / 100) * 100) / 100 : null;
+    const storeEarning = Math.round((amount - (creatorEarning || 0)) * 100) / 100;
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: "DELIVERED", deliveredAt: new Date(), error: null,
+        watermarkedPdfKey, downloadToken, creatorEarning, storeEarning,
+      },
     });
-    const result = await sendPdf({
-      to: order.email, name: order.name, productTitle: order.product.title, orderRef: order.ref,
-      pdfBuffer: pdf, fileName: `${order.product.title.replace(/[^a-z0-9]+/gi, "-")}.pdf`,
-      storeName: settings().storeName || "PDF Store",
-    });
-    if (result && result.preview) emailPreviews.set(order.id, result.preview);
-    await prisma.entitlement.upsert({
-      where: { accountId_productId: { accountId: order.accountId, productId: order.productId } },
-      create: { accountId: order.accountId, productId: order.productId },
-      update: {},
-    });
-    await prisma.order.update({ where: { id: order.id }, data: { status: "DELIVERED", deliveredAt: new Date(), error: null } });
-    console.log(`[order ${order.ref}] delivered to ${order.email}`);
+    console.log(`[order ${order.ref}] delivered (direct download ready)`);
+
+    // Backup email — best-effort, never blocks or reverses delivery.
+    try {
+      const result = await sendPdf({
+        to: order.email, name: order.email, productTitle: order.product.title, orderRef: order.ref,
+        pdfBuffer: pdf, fileName: `${order.product.title.replace(/[^a-z0-9]+/gi, "-")}.pdf`,
+        storeName: settings().storeName || "Store",
+      });
+      if (result && result.preview) emailPreviews.set(order.id, result.preview);
+    } catch (err) {
+      console.error(`[order ${order.ref}] backup email failed (order still delivered):`, err.message);
+    }
   } catch (err) {
     console.error(`[order ${orderId}] delivery failed:`, err.message);
     await prisma.order.update({ where: { id: orderId }, data: { status: "FAILED", error: err.message } }).catch(() => {});
@@ -143,17 +161,20 @@ async function fulfil(orderId) {
   }
 }
 
-// Maps the DB's OrderStatus enum back to the lowercase strings the existing
-// storefront JS already expects, including "delivery_failed" — which isn't
-// its own enum value (the schema only has FAILED), but is distinguishable by
-// whether payment had already succeeded (paidAt set) before the failure.
 function publicOrder(o) {
+  // Distinguishes "paid but delivery itself failed" (e.g. R2 was down when
+  // watermarking/upload ran) from a payment that was simply cancelled or
+  // declined — very different messages for the buyer, and very different
+  // from a bounced backup email, which never touches order status at all
+  // (see fulfil() in server.js).
   let status = String(o.status).toLowerCase();
   if (o.status === "FAILED" && o.paidAt) status = "delivery_failed";
   return {
-    ref: o.ref, productId: o.productId, name: o.name, email: o.email, phone: o.phone,
+    ref: o.ref, productId: o.productId, email: o.email, phone: o.phone,
     amount: toNum(o.amount), status, error: o.error, createdAt: o.createdAt,
-    deliveredAt: o.deliveredAt, emailPreview: emailPreviews.get(o.id) || null,
+    deliveredAt: o.deliveredAt,
+    downloadUrl: o.status === "DELIVERED" ? `/api/orders/${o.ref}/download?token=${o.downloadToken}` : null,
+    emailPreview: emailPreviews.get(o.id) || null,
   };
 }
 
@@ -164,7 +185,9 @@ const publicProduct = (p) => ({
 const adminProductView = (p) => ({
   id: p.id, title: p.title, description: p.description, price: toNum(p.price),
   categoryId: p.categoryId, cover: p.coverImageKey ? `/covers/${p.id}` : null,
-  published: p.published, renderStatus: p.renderStatus, pageCount: p.pageCount, createdAt: p.createdAt,
+  published: p.published, createdAt: p.createdAt,
+  creatorId: p.creatorId, creatorName: p.creator ? p.creator.name : null,
+  creatorSplitPct: toNum(p.creatorSplitPct),
 });
 
 // ================= PUBLIC =================
@@ -172,10 +195,10 @@ app.get("/api/store", async (req, res) => {
   const [s, categories, products] = await Promise.all([
     Promise.resolve(settings()),
     prisma.category.findMany(),
-    prisma.product.findMany({ where: { published: true, renderStatus: "READY" } }),
+    prisma.product.findMany({ where: { published: true }, orderBy: { createdAt: "desc" } }),
   ]);
   res.json({
-    storeName: s.storeName || "PDF Store",
+    storeName: s.storeName || "Store",
     tagline: s.tagline || "",
     categories,
     products: products.map(publicProduct),
@@ -200,48 +223,27 @@ app.get("/covers/:productId", async (req, res) => {
 
 app.post("/api/checkout", async (req, res) => {
   try {
-    const { productId, name, email, phone, username, password, recoveryEmail } = req.body || {};
-    const product = await prisma.product.findFirst({ where: { id: productId, published: true, renderStatus: "READY" } });
+    const { productId, email, phone } = req.body || {};
+    const product = await prisma.product.findFirst({ where: { id: productId, published: true } });
     if (!product) return res.status(400).json({ error: "Product not found." });
-    if (!name || !email || !phone) return res.status(400).json({ error: "Name, email and EcoCash number are required." });
+    if (!email || !phone) return res.status(400).json({ error: "Email and EcoCash number are required." });
     if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Enter a valid email address." });
     const cleanPhone = String(phone).replace(/\s/g, "");
     if (!/^0(77|78)\d{7}$/.test(cleanPhone)) return res.status(400).json({ error: "Enter a valid EcoCash number, e.g. 0771234567." });
-    const cleanUsername = String(username || "").trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,30}$/.test(cleanUsername)) return res.status(400).json({ error: "Choose a username of 3-30 characters: letters, numbers, underscore." });
-    if (!password || String(password).length < 6) return res.status(400).json({ error: "Choose a password of at least 6 characters." });
-
-    // Accounts are created at checkout time, not from an email afterwards
-    // (build brief §8, "Authentication and recovery"). A returning username
-    // must supply its matching password to attach a new purchase to it.
-    let account = await prisma.account.findUnique({ where: { username: cleanUsername } });
-    if (account) {
-      if (!verifyAccountPassword(password, account.passwordHash)) {
-        return res.status(401).json({ error: "That username is already registered. Enter its password to add this purchase to the same account." });
-      }
-    } else {
-      account = await prisma.account.create({
-        data: {
-          username: cleanUsername,
-          passwordHash: hashAccountPassword(password),
-          recoveryEmail: String(recoveryEmail || email).trim().toLowerCase(),
-        },
-      });
-    }
 
     const ref = "ORD-" + crypto.randomBytes(4).toString("hex").toUpperCase();
     const order = await prisma.order.create({
       data: {
-        ref, accountId: account.id, productId: product.id,
-        name: name.trim(), email: email.trim().toLowerCase(), phone: cleanPhone,
+        ref, productId: product.id,
+        email: email.trim().toLowerCase(), phone: cleanPhone,
         amount: product.price, status: "PENDING",
       },
     });
 
     if (DEMO_MODE) {
       await prisma.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } });
-      fulfil(order.id);
-      return res.json({ ref, instructions: "Demo mode: payment simulated. Delivering your PDF now." });
+      await fulfil(order.id);
+      return res.json({ ref, instructions: "Demo mode: payment simulated. Your download is ready." });
     }
     try {
       const paynow = makePaynow();
@@ -271,12 +273,28 @@ app.get("/api/orders/:ref", async (req, res) => {
   if (order.status === "PENDING" && order.paynowPollUrl) {
     try {
       const st = await makePaynow().pollTransaction(order.paynowPollUrl);
-      if (st.paid()) { await prisma.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } }); fulfil(order.id); }
+      if (st.paid()) { await prisma.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } }); await fulfil(order.id); }
       else if (/cancel|fail/i.test(st.status || "")) await prisma.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
     } catch (err) { console.error(`[order ${order.ref}] poll error:`, err.message); }
     order = await prisma.order.findUnique({ where: { ref: req.params.ref } });
   }
   res.json(publicOrder(order));
+});
+
+// Direct download / redownload — no account needed, just the per-order
+// token handed out on the confirmation page (and in the backup email).
+app.get("/api/orders/:ref/download", async (req, res) => {
+  const order = await prisma.order.findUnique({ where: { ref: req.params.ref }, include: { product: true } });
+  if (!order || order.status !== "DELIVERED" || !order.watermarkedPdfKey) return res.sendStatus(404);
+  if (!order.downloadToken || req.query.token !== order.downloadToken) return res.sendStatus(403);
+  try {
+    const buf = await getObjectBuffer(order.watermarkedPdfKey);
+    const fileName = `${order.product.title.replace(/[^a-z0-9]+/gi, "-")}.pdf`;
+    res.set("Content-Type", "application/pdf").set("Content-Disposition", `attachment; filename="${fileName}"`).send(buf);
+  } catch (err) {
+    console.error(`[order ${order.ref}] download failed:`, err.message);
+    res.sendStatus(500);
+  }
 });
 
 app.post("/api/paynow/result", async (req, res) => {
@@ -287,106 +305,67 @@ app.post("/api/paynow/result", async (req, res) => {
   const joined = Object.entries(req.body).filter(([k]) => k !== "hash").map(([, v]) => v).join("");
   const expected = crypto.createHash("sha512").update(joined + process.env.PAYNOW_INTEGRATION_KEY).digest("hex").toUpperCase();
   if (expected !== String(h).toUpperCase()) return console.warn(`[order ${reference}] bad hash, ignored`);
-  if (/^paid$/i.test(status)) { await prisma.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } }); fulfil(order.id); }
+  if (/^paid$/i.test(status)) { await prisma.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } }); await fulfil(order.id); }
   else if (/cancel/i.test(status)) await prisma.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
 });
 
-// ================= CUSTOMER ACCOUNT / CLOSED READER =================
-// Backend only for now — see docs/closed-reader-build-brief.md §9: the
-// reader's visual design isn't finalized, so no reader UI is built here.
-// These are the entitlement-checked APIs it will call once that UI exists.
-function requireAccount(req, res, next) {
-  if (req.session.accountId) return next();
+// ================= CREATOR PORTAL =================
+function requireCreator(req, res, next) {
+  if (req.session.creatorId) return next();
   res.status(401).json({ error: "Sign in required." });
 }
 
-app.post("/api/account/login", async (req, res) => {
+app.get("/creator", (req, res) => res.sendFile(path.join(__dirname, "public", "creator.html")));
+
+// Self-serve first login (build brief decision): admin adds a creator with
+// just name + username, no password. The first successful login with that
+// username *sets* the password from whatever is submitted; every login
+// after that verifies against it normally.
+app.post("/api/creator/login", async (req, res) => {
   const { username, password } = req.body || {};
-  const account = await prisma.account.findUnique({ where: { username: String(username || "").trim().toLowerCase() } });
-  if (!account || !verifyAccountPassword(password || "", account.passwordHash)) {
-    return res.status(401).json({ error: "Wrong username or password." });
+  const cleanUsername = String(username || "").trim().toLowerCase();
+  if (!cleanUsername || !password || String(password).length < 6) {
+    return res.status(400).json({ error: "Enter your username and a password of at least 6 characters." });
   }
-  req.session.accountId = account.id;
-  req.session.username = account.username;
-  res.json({ ok: true, username: account.username });
+  const creator = await prisma.creator.findUnique({ where: { username: cleanUsername } });
+  if (!creator) return res.status(401).json({ error: "Unknown username." });
+
+  if (!creator.passwordHash) {
+    await prisma.creator.update({ where: { id: creator.id }, data: { passwordHash: hashCreatorPassword(password) } });
+  } else if (!verifyCreatorPassword(password, creator.passwordHash)) {
+    return res.status(401).json({ error: "Wrong password." });
+  }
+  req.session.creatorId = creator.id;
+  req.session.creatorName = creator.name;
+  res.json({ ok: true, name: creator.name, username: creator.username });
 });
-app.post("/api/account/logout", (req, res) => req.session.destroy(() => res.json({ ok: true })));
-app.get("/api/account/session", (req, res) => {
-  res.json({ loggedIn: Boolean(req.session.accountId), username: req.session.username || null });
+app.post("/api/creator/logout", (req, res) => req.session.destroy(() => res.json({ ok: true })));
+app.get("/api/creator/session", (req, res) => {
+  res.json({ loggedIn: Boolean(req.session.creatorId), name: req.session.creatorName || null });
 });
 
-app.get("/api/library", requireAccount, async (req, res) => {
-  const entitlements = await prisma.entitlement.findMany({
-    where: { accountId: req.session.accountId },
-    include: { product: true },
-    orderBy: { grantedAt: "desc" },
-  });
-  const progress = await prisma.readingProgress.findMany({ where: { accountId: req.session.accountId } });
-  const progressByProduct = Object.fromEntries(progress.map((p) => [p.productId, p.lastPageViewed]));
-  res.json(entitlements.map((e) => ({
-    productId: e.productId, title: e.product.title, cover: e.product.coverImageKey ? `/covers/${e.productId}` : null,
-    pageCount: e.product.pageCount, lastPageViewed: progressByProduct[e.productId] || 1, grantedAt: e.grantedAt,
+app.get("/api/creator/products", requireCreator, async (req, res) => {
+  const list = await prisma.product.findMany({ where: { creatorId: req.session.creatorId }, orderBy: { createdAt: "desc" } });
+  res.json(list.map((p) => ({
+    id: p.id, title: p.title, price: toNum(p.price), cover: p.coverImageKey ? `/covers/${p.id}` : null,
+    published: p.published, splitPct: toNum(p.creatorSplitPct), createdAt: p.createdAt,
   })));
 });
 
-async function requireEntitlement(req, res, next) {
-  const entitlement = await prisma.entitlement.findUnique({
-    where: { accountId_productId: { accountId: req.session.accountId, productId: req.params.productId } },
+app.get("/api/creator/earnings", requireCreator, async (req, res) => {
+  const orders = await prisma.order.findMany({
+    where: { status: "DELIVERED", product: { creatorId: req.session.creatorId } },
+    include: { product: true },
+    orderBy: { deliveredAt: "desc" },
   });
-  if (!entitlement) return res.status(403).json({ error: "You don't own this book." });
-  next();
-}
-
-app.get("/api/read/:productId/meta", requireAccount, requireEntitlement, async (req, res) => {
-  const product = await prisma.product.findUnique({ where: { id: req.params.productId } });
-  const progress = await prisma.readingProgress.findUnique({
-    where: { accountId_productId: { accountId: req.session.accountId, productId: req.params.productId } },
+  const total = orders.reduce((sum, o) => sum + Number(o.creatorEarning || 0), 0);
+  res.json({
+    total: Math.round(total * 100) / 100,
+    orders: orders.map((o) => ({
+      ref: o.ref, productTitle: o.product.title, amount: toNum(o.amount),
+      earning: toNum(o.creatorEarning), deliveredAt: o.deliveredAt,
+    })),
   });
-  res.json({ title: product.title, pageCount: product.pageCount, lastPageViewed: progress ? progress.lastPageViewed : 1 });
-});
-
-// Anti-scraping page-view cap (build brief §3): a rough per-account,
-// per-book, rolling-24h cap, in memory only. Deliberately simple (a first
-// version, per the brief) and — because it's in memory — only correct on a
-// single server instance; move it to the DB or a shared cache before
-// scaling to more than one Render instance.
-const pageViewLog = new Map(); // `${accountId}:${productId}:${dayKey}` -> count
-function dayKey(d = new Date()) { return d.toISOString().slice(0, 10); }
-function checkAndRecordPageView(accountId, productId, pageCount) {
-  const key = `${accountId}:${productId}:${dayKey()}`;
-  const count = pageViewLog.get(key) || 0;
-  const cap = Math.max(20, pageCount * 2);
-  if (count >= cap) return false;
-  pageViewLog.set(key, count + 1);
-  return true;
-}
-
-app.get("/api/read/:productId/page/:n", requireAccount, requireEntitlement, async (req, res) => {
-  try {
-    const pageNumber = Number(req.params.n);
-    const product = await prisma.product.findUnique({ where: { id: req.params.productId } });
-    if (!product || !Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > (product.pageCount || 0)) {
-      return res.status(404).json({ error: "Page not found." });
-    }
-    if (!checkAndRecordPageView(req.session.accountId, req.params.productId, product.pageCount)) {
-      return res.status(429).json({ error: "You've hit today's reading limit for this book. Try again tomorrow." });
-    }
-    const page = await prisma.renderedPage.findUnique({
-      where: { productId_pageNumber: { productId: req.params.productId, pageNumber } },
-    });
-    if (!page) return res.status(404).json({ error: "Page not found." });
-    const clean = await getObjectBuffer(page.imageKey);
-    const watermarked = await watermarkPageImage(clean, { username: req.session.username, date: dayKey() });
-    await prisma.readingProgress.upsert({
-      where: { accountId_productId: { accountId: req.session.accountId, productId: req.params.productId } },
-      create: { accountId: req.session.accountId, productId: req.params.productId, lastPageViewed: pageNumber },
-      update: { lastPageViewed: pageNumber },
-    });
-    res.set("Content-Type", "image/png").set("Cache-Control", "no-store").send(watermarked);
-  } catch (err) {
-    console.error(`[read ${req.params.productId} page ${req.params.n}] failed:`, err.message);
-    res.status(500).json({ error: "Could not load that page." });
-  }
 });
 
 // ================= ADMIN =================
@@ -430,6 +409,14 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Recorded-in-our-own-data revenue meter — NOT a live bank feed (build
+// brief decision: there is no API connection to the real EcoCash/bank
+// balance, this only reflects orders this app itself marked DELIVERED).
+app.get("/api/admin/summary", requireAdmin, async (req, res) => {
+  const agg = await prisma.order.aggregate({ where: { status: "DELIVERED" }, _sum: { amount: true }, _count: true });
+  res.json({ totalRevenue: toNum(agg._sum.amount) || 0, deliveredOrders: agg._count });
+});
+
 // categories
 app.get("/api/admin/categories", requireAdmin, async (req, res) => res.json(await prisma.category.findMany()));
 app.post("/api/admin/categories", requireAdmin, async (req, res) => {
@@ -451,17 +438,59 @@ app.delete("/api/admin/categories/:id", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// creators
+app.get("/api/admin/creators", requireAdmin, async (req, res) => {
+  const creators = await prisma.creator.findMany({ orderBy: { createdAt: "desc" } });
+  const earnings = await prisma.order.groupBy({
+    by: ["productId"], where: { status: "DELIVERED" }, _sum: { creatorEarning: true },
+  });
+  const products = await prisma.product.findMany({ where: { creatorId: { not: null } }, select: { id: true, creatorId: true } });
+  const earningsByProduct = Object.fromEntries(earnings.map((e) => [e.productId, Number(e._sum.creatorEarning || 0)]));
+  const earningsByCreator = {};
+  for (const p of products) earningsByCreator[p.creatorId] = (earningsByCreator[p.creatorId] || 0) + (earningsByProduct[p.id] || 0);
+  const productCountByCreator = {};
+  for (const p of products) productCountByCreator[p.creatorId] = (productCountByCreator[p.creatorId] || 0) + 1;
+  res.json(creators.map((c) => ({
+    id: c.id, name: c.name, username: c.username, createdAt: c.createdAt,
+    passwordSet: Boolean(c.passwordHash),
+    productCount: productCountByCreator[c.id] || 0,
+    totalEarnings: Math.round((earningsByCreator[c.id] || 0) * 100) / 100,
+  })));
+});
+app.post("/api/admin/creators", requireAdmin, async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const username = String(req.body.username || "").trim().toLowerCase();
+  if (!name) return res.status(400).json({ error: "Creator name is required." });
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) return res.status(400).json({ error: "Username: 3-30 characters, letters/numbers/underscore." });
+  try {
+    const creator = await prisma.creator.create({ data: { name, username } });
+    res.json({ id: creator.id, name: creator.name, username: creator.username });
+  } catch (err) {
+    if (err.code === "P2002") return res.status(400).json({ error: "That username is already taken." });
+    console.error(err);
+    res.status(500).json({ error: "Could not create the creator." });
+  }
+});
+app.delete("/api/admin/creators/:id", requireAdmin, async (req, res) => {
+  await prisma.$transaction([
+    prisma.product.updateMany({ where: { creatorId: req.params.id }, data: { creatorId: null, creatorSplitPct: 0 } }),
+    prisma.creator.delete({ where: { id: req.params.id } }),
+  ]).catch(() => {});
+  res.json({ ok: true });
+});
+
 // products
 app.get("/api/admin/products", requireAdmin, async (req, res) => {
-  const list = await prisma.product.findMany({ orderBy: { createdAt: "desc" } });
+  const list = await prisma.product.findMany({ include: { creator: true }, orderBy: { createdAt: "desc" } });
   res.json(list.map(adminProductView));
 });
 app.post("/api/admin/products", requireAdmin, upload.fields([{ name: "pdf", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req, res) => {
-  const { title, description, price, categoryId } = req.body;
+  const { title, description, price, categoryId, creatorId, creatorSplitPct } = req.body;
   const pdfFile = req.files && req.files.pdf && req.files.pdf[0];
   const coverFile = req.files && req.files.cover && req.files.cover[0];
   if (!title || !(Number(price) > 0)) return res.status(400).json({ error: "Title and a price above zero are required." });
   if (!pdfFile) return res.status(400).json({ error: "Upload the PDF file." });
+  const splitPct = creatorId ? Math.max(0, Math.min(100, Number(creatorSplitPct) || 0)) : 0;
   try {
     // Created with a placeholder sourcePdfKey to get an id, then updated
     // once the object key (which is derived from that id) is known.
@@ -469,7 +498,8 @@ app.post("/api/admin/products", requireAdmin, upload.fields([{ name: "pdf", maxC
       data: {
         title: title.trim(), description: (description || "").trim(),
         price: Number(Number(price).toFixed(2)), categoryId: categoryId || null,
-        sourcePdfKey: "pending", renderStatus: "PENDING", published: false,
+        creatorId: creatorId || null, creatorSplitPct: splitPct,
+        sourcePdfKey: "pending", published: false,
       },
     });
     const pdfKey = `products/${product.id}/source.pdf`;
@@ -480,10 +510,9 @@ app.post("/api/admin/products", requireAdmin, upload.fields([{ name: "pdf", maxC
       coverKey = `products/${product.id}/cover${ext}`;
       await putObject(coverKey, coverFile.buffer, coverFile.mimetype);
     }
-    const updated = await prisma.product.update({ where: { id: product.id }, data: { sourcePdfKey: pdfKey, coverImageKey: coverKey } });
-    // Not awaited: rendering can take a while for a long book, and the admin
-    // shouldn't have to wait for it before the response comes back (brief §3).
-    renderProduct(product.id, pdfFile.buffer).catch((err) => console.error(`[product ${product.id}] render kickoff failed:`, err.message));
+    const updated = await prisma.product.update({
+      where: { id: product.id }, data: { sourcePdfKey: pdfKey, coverImageKey: coverKey }, include: { creator: true },
+    });
     res.json(adminProductView(updated));
   } catch (err) {
     console.error(err);
@@ -499,24 +528,19 @@ app.put("/api/admin/products/:id", requireAdmin, upload.fields([{ name: "pdf", m
   if (typeof b.description === "string") data.description = b.description.trim();
   if (b.price && Number(b.price) > 0) data.price = Number(Number(b.price).toFixed(2));
   if ("categoryId" in b) data.categoryId = b.categoryId || null;
-  if ("published" in b) {
-    const wantsPublished = b.published === "true" || b.published === true;
-    if (wantsPublished && product.renderStatus !== "READY") {
-      return res.status(400).json({ error: "This book isn't ready to publish yet — pages are still rendering." });
-    }
-    data.published = wantsPublished;
+  if ("creatorId" in b) {
+    data.creatorId = b.creatorId || null;
+    data.creatorSplitPct = data.creatorId ? Math.max(0, Math.min(100, Number(b.creatorSplitPct) || 0)) : 0;
+  } else if ("creatorSplitPct" in b && product.creatorId) {
+    data.creatorSplitPct = Math.max(0, Math.min(100, Number(b.creatorSplitPct) || 0));
   }
+  if ("published" in b) data.published = b.published === "true" || b.published === true;
 
   const pdfFile = req.files && req.files.pdf && req.files.pdf[0];
   const coverFile = req.files && req.files.cover && req.files.cover[0];
   try {
     if (pdfFile) {
-      // A re-uploaded PDF invalidates every previously rendered page.
-      await clearRenderedPages(product.id);
       await putObject(product.sourcePdfKey, pdfFile.buffer, "application/pdf");
-      data.renderStatus = "PENDING";
-      data.pageCount = null;
-      data.published = false;
     }
     if (coverFile) {
       if (product.coverImageKey) await deleteObject(product.coverImageKey).catch(() => {});
@@ -524,8 +548,7 @@ app.put("/api/admin/products/:id", requireAdmin, upload.fields([{ name: "pdf", m
       data.coverImageKey = `products/${product.id}/cover${ext}`;
       await putObject(data.coverImageKey, coverFile.buffer, coverFile.mimetype);
     }
-    const updated = await prisma.product.update({ where: { id: product.id }, data });
-    if (pdfFile) renderProduct(product.id, pdfFile.buffer).catch((err) => console.error(`[product ${product.id}] render kickoff failed:`, err.message));
+    const updated = await prisma.product.update({ where: { id: product.id }, data, include: { creator: true } });
     res.json(adminProductView(updated));
   } catch (err) {
     console.error(err);
@@ -535,18 +558,13 @@ app.put("/api/admin/products/:id", requireAdmin, upload.fields([{ name: "pdf", m
 app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
   const product = await prisma.product.findUnique({ where: { id: req.params.id } });
   if (!product) return res.json({ ok: true });
-  // Fetch the rendered-page image keys *before* deleting the product — the
-  // delete cascades and removes these DB rows, so this list would come back
-  // empty if fetched afterwards, and the R2 objects would leak forever.
-  const pages = await prisma.renderedPage.findMany({ where: { productId: product.id } });
   try {
-    await prisma.product.delete({ where: { id: product.id } }); // RenderedPage rows cascade
+    await prisma.product.delete({ where: { id: product.id } });
   } catch (err) {
-    if (err.code === "P2003") return res.status(400).json({ error: "This book has orders or entitlements on it and can't be deleted. Unpublish it instead." });
+    if (err.code === "P2003") return res.status(400).json({ error: "This book has orders on it and can't be deleted. Unpublish it instead." });
     console.error(err);
     return res.status(500).json({ error: "Could not delete the product." });
   }
-  for (const page of pages) await deleteObject(page.imageKey).catch((err) => console.error(`[product ${product.id}] failed to delete ${page.imageKey}:`, err.message));
   if (product.sourcePdfKey) await deleteObject(product.sourcePdfKey).catch(() => {});
   if (product.coverImageKey) await deleteObject(product.coverImageKey).catch(() => {});
   res.json({ ok: true });
@@ -554,7 +572,10 @@ app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/orders", requireAdmin, async (req, res) => {
   const list = await prisma.order.findMany({ include: { product: true }, orderBy: { createdAt: "desc" } });
-  res.json(list.map((o) => ({ ...publicOrder(o), productTitle: o.product.title })));
+  res.json(list.map((o) => ({
+    ...publicOrder(o), productTitle: o.product.title,
+    creatorEarning: toNum(o.creatorEarning), storeEarning: toNum(o.storeEarning),
+  })));
 });
 
 // upload errors as JSON

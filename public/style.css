@@ -18,6 +18,23 @@
   --max: 1120px;
 }
 
+/* ---------- storefront theme: simple black-on-white, iTunes/App Store
+   look. Scoped to body.store (index.html only) so admin/creator keep the
+   dark theme above — every rule below just consumes these same variables,
+   so nothing else needs to change. ---------- */
+body.store {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f4f4f4;
+  --line: #e7e7e7;
+  --line-strong: #cfcfcf;
+  --text: #000000;
+  --muted: #6b6b6b;
+  --blue: #000000;
+  --blue-soft: rgba(0, 0, 0, 0.06);
+  --blue-line: rgba(0, 0, 0, 0.5);
+}
+
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -62,31 +79,24 @@ main { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
 .hero h1 { font-size: 42px; line-height: 1.08; letter-spacing: -0.025em; font-weight: 700; max-width: 640px; }
 .hero p { margin-top: 14px; font-size: 17px; color: var(--muted); max-width: 560px; }
 
-.filters { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 0 28px; }
-.chip {
-  font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 999px;
-  border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer;
-}
-.chip:hover { border-color: var(--line-strong); color: var(--text); }
-.chip.active { background: var(--blue-soft); border-color: var(--blue-line); color: var(--text); }
-
-.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; padding-bottom: 72px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 28px 22px; padding-bottom: 72px; }
 .card {
-  display: flex; flex-direction: column; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
-  transition: border-color 140ms, transform 140ms;
+  display: flex; flex-direction: column; background: transparent;
+  border: 0; border-radius: 0; overflow: visible;
 }
-.card:hover { border-color: var(--blue-line); transform: translateY(-2px); }
-.cover { aspect-ratio: 3 / 4; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; border-bottom: 1px solid var(--line); }
+.cover {
+  aspect-ratio: 1 / 1; background: var(--surface-2); display: grid; place-items: center; overflow: hidden;
+  border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: transform 140ms;
+}
+.card:hover .cover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16); }
 .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cover .initial { font-family: var(--mono); font-size: 44px; color: var(--line-strong); font-weight: 700; }
-.card-body { padding: 14px 14px 16px; display: flex; flex-direction: column; flex: 1; }
-.card .cat { font-size: 12px; color: var(--blue); margin-bottom: 4px; }
-.card h3 { font-size: 15px; font-weight: 600; line-height: 1.3; }
-.card .desc { margin-top: 6px; font-size: 13px; color: var(--muted); flex: 1;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.card .row { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; }
+.card-body { padding: 10px 2px 0; display: flex; flex-direction: column; flex: 1; }
+.card h3 { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.card .row { margin-top: 6px; display: flex; align-items: center; justify-content: space-between; }
 .price { font-family: var(--mono); font-size: 14px; }
+.drawer-desc { margin: -10px 0 20px; font-size: 13px; color: var(--muted); }
 
 .empty {
   border: 1px dashed var(--line-strong); border-radius: var(--r); padding: 56px 24px;
@@ -171,6 +181,11 @@ textarea { min-height: 84px; resize: vertical; }
 .content { padding: 32px 36px; max-width: 900px; }
 .content h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
 .content .sub { color: var(--muted); margin-bottom: 26px; }
+.meter { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 20px; margin-bottom: 20px; }
+.meter > div:first-child { display: flex; align-items: baseline; justify-content: space-between; }
+.meter-label { font-size: 13px; color: var(--muted); }
+.meter-value { font-family: var(--mono); font-size: 26px; font-weight: 700; }
+.meter-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; margin-bottom: 20px; }
 .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
@@ -195,9 +210,8 @@ tr:last-child td { border-bottom: 0; }
 .login h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .login .sub { margin-bottom: 20px; }
 
-@media (max-width: 1000px) { .grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 760px) {
-  .grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .grid { gap: 20px 14px; }
   .hero { padding: 44px 0 28px; } .hero h1 { font-size: 30px; }
   .how { grid-template-columns: 1fr; }
   .shell { grid-template-columns: 1fr; }

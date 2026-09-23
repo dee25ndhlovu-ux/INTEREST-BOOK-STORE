@@ -6,12 +6,11 @@
 <title>Store</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="store">
 
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/"><span class="brand-mark" id="mark">S</span><span id="brandName">Store</span></a>
-    <nav><a href="#books">Books</a><a href="#how">How it works</a></nav>
+    <a class="brand" href="/"><span id="brandName">Store</span></a>
   </div>
 </header>
 
@@ -21,14 +20,12 @@
     <p id="heroTagline"></p>
   </section>
 
-  <div class="filters" id="filters" hidden></div>
-
   <section id="books" aria-live="polite"></section>
 
   <section id="how" class="how">
-    <div><b>Choose a title</b><span>Enter your name, email and EcoCash number.</span></div>
+    <div><b>Choose a title</b><span>Enter your email and EcoCash number.</span></div>
     <div><b>Approve on your phone</b><span>A prompt appears on your phone. Enter your EcoCash PIN.</span></div>
-    <div><b>Check your inbox</b><span>Your PDF arrives by email, licensed to you with your name on every page.</span></div>
+    <div><b>Download instantly</b><span>Your PDF unlocks right on this page. We also email a backup copy.</span></div>
   </section>
 </main>
 
@@ -45,14 +42,11 @@
       <div class="thumb" id="dThumb"></div>
       <div><h2 id="dTitle"></h2><p class="price" id="dPrice"></p></div>
     </div>
+    <p class="drawer-desc" id="dDesc"></p>
 
     <div id="stepForm">
-      <label>Full name<input id="fName" type="text" autocomplete="name"></label>
-      <label>Email address<input id="fEmail" type="email" autocomplete="email"><small>Your PDF is sent here.</small></label>
+      <label>Email address<input id="fEmail" type="email" autocomplete="email"><small>Your PDF is delivered here as a backup copy.</small></label>
       <label>EcoCash number<input id="fPhone" type="tel" inputmode="numeric" placeholder="0771234567"></label>
-      <label>Choose a username<input id="fUsername" type="text" autocomplete="username" placeholder="letters, numbers, underscore">
-        <small>Your purchases are saved to this account — reuse it next time to add another book to the same login.</small></label>
-      <label>Choose a password<input id="fPassword" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label>
       <p class="error" id="formError" hidden></p>
       <button class="btn primary full" id="payBtn">Pay with EcoCash</button>
       <p class="fine">You'll get a prompt on your phone. Enter your PIN to approve.</p>
@@ -67,10 +61,11 @@
     </div>
 
     <div id="stepDone" hidden>
-      <p class="status-title ok">Sent to <span id="doneEmail"></span></p>
-      <p class="muted">Check your inbox and spam folder. Order <span class="mono" id="doneRef"></span>.</p>
-      <p id="previewWrap" hidden style="margin-top:16px"><a class="btn ghost" id="previewLink" target="_blank" rel="noopener">Open test email preview</a></p>
-      <button class="btn primary full" id="doneBtn" style="margin-top:22px">Done</button>
+      <p class="status-title ok">Your download is ready</p>
+      <p class="muted">Order <span class="mono" id="doneRef"></span>. We've also emailed a backup copy to <span id="doneEmail"></span>.</p>
+      <a class="btn primary full" id="downloadLink" style="margin-top:22px" download>Download your PDF</a>
+      <p class="fine" id="previewWrap" hidden><a id="previewLink" target="_blank" rel="noopener">Open test email preview</a></p>
+      <button class="btn ghost full" id="doneBtn" style="margin-top:12px">Close</button>
     </div>
 
     <div id="stepFail" hidden>

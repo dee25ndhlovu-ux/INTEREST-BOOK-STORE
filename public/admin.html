@@ -23,6 +23,7 @@
     <div class="brand"><span class="brand-mark">A</span>Admin</div>
     <button class="nav active" data-view="products">Products</button>
     <button class="nav" data-view="categories">Categories</button>
+    <button class="nav" data-view="creators">Creators</button>
     <button class="nav" data-view="orders">Orders</button>
     <button class="nav" data-view="settings">Settings</button>
     <div class="spacer"></div>
@@ -33,6 +34,11 @@
   <section class="content">
     <p class="notice" id="noPassNotice" hidden>The admin panel has no password yet, so anyone with this link can change your store. Set one under Settings.</p>
     <p class="notice" id="demoNotice" hidden>Demo mode is on: payments are simulated and no money moves. Turn it off in Render (DEMO_MODE=false) when you go live.</p>
+
+    <div class="meter" id="revenueMeter">
+      <div><span class="meter-label">Recorded revenue</span><span class="meter-value" id="revTotal">US$0.00</span></div>
+      <div class="meter-sub"><span id="revOrders">0</span> delivered orders · recorded in this store's own data, not a live bank feed</div>
+    </div>
 
     <!-- Products -->
     <div data-panel="products">
@@ -49,7 +55,11 @@
         </div>
         <div class="two">
           <label>PDF file<input id="pPdf" type="file" accept="application/pdf"><small id="pPdfHint">The master file customers pay for.</small></label>
-          <label>Cover image<input id="pCover" type="file" accept="image/png,image/jpeg,image/webp"><small>Portrait works best (3:4). PNG, JPG or WebP.</small></label>
+          <label>Cover image<input id="pCover" type="file" accept="image/png,image/jpeg,image/webp"><small>Square works best. PNG, JPG or WebP.</small></label>
+        </div>
+        <div class="two">
+          <label>Creator<select id="pCreator"><option value="">None (100% store)</option></select></label>
+          <label>Creator's split (%)<input id="pSplit" type="number" min="0" max="100" step="1" value="0"><small>Their share of each sale. Frozen into each order at sale time.</small></label>
         </div>
         <div style="display:flex;gap:10px">
           <button class="btn primary" id="prodSave">Add product</button>
@@ -58,7 +68,7 @@
       </div>
       <div class="panel">
         <h2>Listed</h2>
-        <table><thead><tr><th></th><th>Title</th><th>Category</th><th>Price</th><th>Rendering</th><th>Visible</th><th></th></tr></thead><tbody id="prodList"></tbody></table>
+        <table><thead><tr><th></th><th>Title</th><th>Category</th><th>Creator</th><th>Price</th><th>Visible</th><th></th></tr></thead><tbody id="prodList"></tbody></table>
       </div>
     </div>
 
@@ -73,12 +83,30 @@
       <div class="panel"><h2>Existing</h2><div class="tag-list" id="catList"></div></div>
     </div>
 
+    <!-- Creators -->
+    <div data-panel="creators" hidden>
+      <h1>Creators</h1>
+      <p class="sub">Add a creator, then assign them to a product (with a split %) from the Products tab. They sign in at <span class="mono">/creator</span> with their username, setting their own password the first time.</p>
+      <div class="panel">
+        <p class="error" id="creatorError" hidden></p>
+        <div class="two">
+          <label>Name<input id="crName" type="text" placeholder="e.g. Tendai Moyo"></label>
+          <label>Username<input id="crUsername" type="text" placeholder="letters, numbers, underscore"></label>
+        </div>
+        <button class="btn primary" id="crAdd">Add creator</button>
+      </div>
+      <div class="panel">
+        <h2>Existing</h2>
+        <table><thead><tr><th>Name</th><th>Username</th><th>Products</th><th>Earnings</th><th>First login</th><th></th></tr></thead><tbody id="creatorList"></tbody></table>
+      </div>
+    </div>
+
     <!-- Orders -->
     <div data-panel="orders" hidden>
       <h1>Orders</h1>
-      <p class="sub">Orders since the server last started. Delivered means the watermarked PDF was emailed.</p>
+      <p class="sub">Orders since the server last started. Delivered means the watermarked PDF is ready to download (and a backup copy was emailed, if that succeeded).</p>
       <div class="panel">
-        <table><thead><tr><th>Ref</th><th>Buyer</th><th>Title</th><th>Amount</th><th>Status</th><th>Time</th></tr></thead><tbody id="orderList"></tbody></table>
+        <table><thead><tr><th>Ref</th><th>Buyer</th><th>Title</th><th>Amount</th><th>Split</th><th>Status</th><th>Time</th></tr></thead><tbody id="orderList"></tbody></table>
       </div>
     </div>
 

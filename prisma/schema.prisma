@@ -1,10 +1,6 @@
-// Schema for the closed-reader rebuild. See /docs/closed-reader-build-brief.md
-// for the full architecture this maps to.
-//
-// This replaces the current data/products.json, data/categories.json, and the
-// in-memory `orders` Map in server.js. Nothing here is wired into server.js
-// yet — this is the schema and generated client only, added so the rest of
-// the migration can build on top of it.
+// Schema for the direct-download store with creator revenue splits. See
+// /docs/build-brief.md for the architecture this maps to. Supersedes the
+// earlier closed-reader design — no buyer accounts, no page-by-page reader.
 
 generator client {
   provider = "prisma-client-js"
@@ -18,26 +14,10 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------- accounts ----------
-// Self-chosen username + password, not email. recovery_email is captured at
-// signup but plays no role in day-to-day login (see brief §8, Authentication
-// and recovery). Created at checkout time, not from an email afterwards.
-model Account {
-  id            String   @id @default(cuid())
-  username      String   @unique
-  passwordHash  String
-  recoveryEmail String
-  createdAt     DateTime @default(now())
-
-  orders          Order[]
-  entitlements    Entitlement[]
-  readingProgress ReadingProgress[]
-
-  @@map("accounts")
-}
-
 // ---------- catalogue ----------
-// Seeded once from the existing data/categories.json.
+// Seeded once from the existing data/categories.json. No longer used for
+// storefront filtering (the redesigned store shows one flat grid), kept for
+// admin-side organisation only.
 model Category {
   id   String @id @default(cuid())
   name String @unique
@@ -47,54 +27,48 @@ model Category {
   @@map("categories")
 }
 
-enum RenderStatus {
-  PENDING // pages not rendered yet — not purchasable
-  PROCESSING // upload-time rendering in progress
-  READY // every page rendered and cached — safe to sell
-  FAILED
+// A book's creator, for revenue-split accounting. Added by admin with just
+// name + username; the creator sets their own password the first time they
+// sign in at /creator (see requireCreator in server.js).
+model Creator {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  passwordHash String? // null until first login — that login sets it
+  createdAt    DateTime @default(now())
+
+  products Product[]
+
+  @@map("creators")
 }
 
-// Seeded once from the existing data/products.json. `sourcePdfKey` and
-// `coverImageKey` are object keys in R2 (see lib/storage.js), not local
-// filesystem paths — the master PDF is never served directly (brief §3).
+// `sourcePdfKey` is an R2 object key (see storage.js), not a local
+// filesystem path — the master PDF is private and never sent to a client
+// directly; a fresh watermarked copy is generated per order (see fulfil()
+// in server.js). `creatorSplitPct` is the creator's share of each sale for
+// this product (0-100); frozen into the order at sale time so a later
+// change to this field never rewrites historical earnings.
 model Product {
-  id            String       @id @default(cuid())
-  title         String
-  description   String       @default("")
-  price         Decimal      @db.Decimal(10, 2)
-  categoryId    String?
-  category      Category?    @relation(fields: [categoryId], references: [id])
-  sourcePdfKey  String // R2 object key for the master PDF — private, never sent to a client
-  coverImageKey String?
-  pageCount     Int? // set once rendering finishes
-  renderStatus  RenderStatus @default(PENDING)
-  published     Boolean      @default(false) // forced false until renderStatus = READY
-  createdAt     DateTime     @default(now())
+  id              String   @id @default(cuid())
+  title           String
+  description     String   @default("")
+  price           Decimal  @db.Decimal(10, 2)
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id])
+  sourcePdfKey    String // R2 object key for the master PDF — private, never sent to a client
+  coverImageKey   String?
+  published       Boolean  @default(false)
+  creatorId       String?
+  creator         Creator? @relation(fields: [creatorId], references: [id])
+  creatorSplitPct Decimal  @default(0) @db.Decimal(5, 2) // 0-100
+  createdAt       DateTime @default(now())
 
-  renderedPages   RenderedPage[]
-  orders          Order[]
-  entitlements    Entitlement[]
-  readingProgress ReadingProgress[]
+  orders Order[]
 
   @@map("products")
 }
 
-// One row per page per book — the clean, unwatermarked render cached at
-// upload time (brief §3). Never sent to a client directly; the watermark is
-// composited on top of this per view, per request.
-model RenderedPage {
-  id          String   @id @default(cuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  pageNumber  Int
-  imageKey    String // R2 object key for the clean rendered page image
-  createdAt   DateTime @default(now())
-
-  @@unique([productId, pageNumber])
-  @@map("rendered_pages")
-}
-
-// ---------- orders & entitlements ----------
+// ---------- orders ----------
 enum OrderStatus {
   PENDING
   PAID
@@ -103,57 +77,31 @@ enum OrderStatus {
   CANCELLED
 }
 
-// Replaces the in-memory `orders` Map in server.js. Field names mirror the
-// existing order object there (ref, name, email, phone, amount, status) so
-// the checkout/poll/webhook handlers can be ported over with minimal change.
+// No accountId — checkout no longer creates or requires a buyer account
+// (just email + EcoCash number). `watermarkedPdfKey` and `downloadToken`
+// back the direct-download link shown on the confirmation page and reused
+// as a redownload link (see /api/orders/:ref/download in server.js) —
+// generated once, at delivery time, so it survives independent of email
+// success. creatorEarning/storeEarning are computed from the product's
+// creatorSplitPct at delivery time and frozen here.
 model Order {
-  id          String      @id @default(cuid())
-  ref         String      @unique // e.g. "ORD-XXXXXXXX", same format as today
-  accountId   String
-  account     Account     @relation(fields: [accountId], references: [id])
-  productId   String
-  product     Product     @relation(fields: [productId], references: [id])
-  name        String
-  email       String
-  phone       String
-  amount      Decimal     @db.Decimal(10, 2)
-  status      OrderStatus @default(PENDING)
-  paynowPollUrl String?
-  error       String?
-  createdAt   DateTime    @default(now())
-  paidAt      DateTime?
-  deliveredAt DateTime?
+  id                String      @id @default(cuid())
+  ref               String      @unique // e.g. "ORD-XXXXXXXX"
+  productId         String
+  product           Product     @relation(fields: [productId], references: [id])
+  email             String
+  phone             String
+  amount            Decimal     @db.Decimal(10, 2)
+  status            OrderStatus @default(PENDING)
+  paynowPollUrl     String?
+  error             String?
+  watermarkedPdfKey String?
+  downloadToken     String?     @unique
+  creatorEarning    Decimal?    @db.Decimal(10, 2)
+  storeEarning      Decimal?    @db.Decimal(10, 2)
+  createdAt         DateTime    @default(now())
+  paidAt            DateTime?
+  deliveredAt       DateTime?
 
   @@map("orders")
-}
-
-// What an account actually owns, written once an order reaches PAID.
-// Kept separate from Order so the reader only ever needs one simple check
-// ("does this account own this product") rather than reasoning through
-// order/payment status each time (brief §8).
-model Entitlement {
-  id         String   @id @default(cuid())
-  accountId  String
-  account    Account  @relation(fields: [accountId], references: [id])
-  productId  String
-  product    Product  @relation(fields: [productId], references: [id])
-  grantedAt  DateTime @default(now())
-
-  @@unique([accountId, productId])
-  @@map("entitlements")
-}
-
-// ---------- reading progress ----------
-// Purchased-content progress only. Local-file-library progress (brief §7)
-// stays on-device and does not sync through the server.
-model ReadingProgress {
-  accountId      String
-  account        Account  @relation(fields: [accountId], references: [id])
-  productId      String
-  product        Product  @relation(fields: [productId], references: [id])
-  lastPageViewed Int      @default(1)
-  updatedAt      DateTime @updatedAt
-
-  @@id([accountId, productId])
-  @@map("reading_progress")
 }

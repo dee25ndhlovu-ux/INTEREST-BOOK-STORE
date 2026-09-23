@@ -1,4 +1,10 @@
-# Book Platform Build Brief — Closed Reader + EcoCash Store
+> **Superseded.** The closed-reader model described in this document was built, then reverted —
+> the project owner decided it added too much buyer friction for the piracy protection it bought.
+> Current architecture: direct watermarked-PDF download, no buyer accounts, creator revenue splits.
+> See `docs/build-brief.md`. This file is kept for historical context only — do not build against
+> it.
+
+# Book Platform Build Brief — Closed Reader + EcoCash Store (superseded)
 
 Status: architecture discussion, not yet built. This document captures decisions made in planning so far, so a coding agent (this tool continued, or Claude Code against the live repository) can pick up the work without needing the original conversation. Sections marked "Open" are not yet decided and should be confirmed with the project owner before an agent invents an answer.
 
