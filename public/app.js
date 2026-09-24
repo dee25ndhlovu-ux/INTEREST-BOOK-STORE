@@ -13,6 +13,7 @@ async function load() {
   document.title = store.storeName;
   $("brandName").textContent = store.storeName;
   $("footName").textContent = store.storeName;
+  if (store.logo) { $("brandLogo").src = store.logo; $("brandLogo").hidden = false; }
   $("heroTitle").textContent = store.storeName;
   $("heroTagline").textContent = store.tagline;
   renderGrid();

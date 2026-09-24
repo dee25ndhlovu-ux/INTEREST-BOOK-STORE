@@ -200,9 +200,27 @@ app.get("/api/store", async (req, res) => {
   res.json({
     storeName: s.storeName || "Store",
     tagline: s.tagline || "",
+    logo: s.logoKey ? "/logo" : null,
     categories,
     products: products.map(publicProduct),
   });
+});
+
+// Store logo, like covers below, lives in R2 — the key itself is recorded in
+// settings.json (same known ephemeral-disk gap as storeName/tagline, see
+// docs/build-brief.md), not the image bytes.
+app.get("/logo", async (req, res) => {
+  const key = settings().logoKey;
+  if (!key) return res.sendStatus(404);
+  try {
+    const buf = await getObjectBuffer(key);
+    const ext = (key.match(/\.(\w+)$/) || [, "png"])[1].toLowerCase();
+    const type = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+    res.set("Content-Type", type).set("Cache-Control", "public, max-age=604800").send(buf);
+  } catch (err) {
+    console.error("logo fetch failed:", err.message);
+    res.sendStatus(404);
+  }
 });
 
 // Cover images live in R2, not on local disk (see storage.js) — this streams
@@ -406,6 +424,27 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
   if (typeof req.body.storeName === "string") s.storeName = req.body.storeName.trim().slice(0, 60);
   if (typeof req.body.tagline === "string") s.tagline = req.body.tagline.trim().slice(0, 160);
   db.write("settings", s);
+  res.json({ ok: true });
+});
+app.post("/api/admin/settings/logo", requireAdmin, upload.single("logo"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Choose an image file." });
+  try {
+    const s = settings();
+    const ext = (req.file.originalname.match(/\.\w+$/) || [".png"])[0];
+    const key = `store/logo${ext}`;
+    await putObject(key, req.file.buffer, req.file.mimetype);
+    if (s.logoKey && s.logoKey !== key) await deleteObject(s.logoKey).catch(() => {});
+    s.logoKey = key;
+    db.write("settings", s);
+    res.json({ ok: true, logo: "/logo" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not save the logo." });
+  }
+});
+app.delete("/api/admin/settings/logo", requireAdmin, async (req, res) => {
+  const s = settings();
+  if (s.logoKey) { await deleteObject(s.logoKey).catch(() => {}); delete s.logoKey; db.write("settings", s); }
   res.json({ ok: true });
 });
 

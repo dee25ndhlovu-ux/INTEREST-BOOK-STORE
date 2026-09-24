@@ -175,7 +175,24 @@ async function loadOrders() {
 async function loadSettings() {
   const s = await api("/api/admin/settings");
   $("sName").value = s.storeName || ""; $("sTagline").value = s.tagline || "";
+  if (s.logoKey) { $("logoPreview").src = "/logo?" + Date.now(); $("logoPreview").hidden = false; $("logoRemove").hidden = false; }
+  else { $("logoPreview").hidden = true; $("logoRemove").hidden = true; }
 }
+$("logoSave").onclick = async () => {
+  showErr("logoError", "");
+  if (!$("logoFile").files[0]) { showErr("logoError", "Choose an image file first."); return; }
+  $("logoSave").disabled = true;
+  try {
+    const fd = new FormData(); fd.append("logo", $("logoFile").files[0]);
+    await api("/api/admin/settings/logo", { method: "POST", body: fd });
+    $("logoFile").value = ""; await loadSettings();
+  } catch (e) { showErr("logoError", e.message); }
+  finally { $("logoSave").disabled = false; }
+};
+$("logoRemove").onclick = async () => {
+  if (!confirm("Remove the store logo?")) return;
+  await api("/api/admin/settings/logo", { method: "DELETE" }); await loadSettings();
+};
 $("sSave").onclick = async () => {
   await api("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storeName: $("sName").value, tagline: $("sTagline").value }) });
   $("sSaved").hidden = false; setTimeout(() => ($("sSaved").hidden = true), 2000);

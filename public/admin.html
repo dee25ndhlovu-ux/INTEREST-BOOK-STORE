@@ -121,6 +121,18 @@
         <button class="btn primary" id="sSave">Save</button> <span class="muted" id="sSaved" hidden>Saved.</span>
       </div>
       <div class="panel">
+        <h2>Logo</h2>
+        <p class="error" id="logoError" hidden></p>
+        <div class="inline" style="align-items:center">
+          <img id="logoPreview" hidden style="height:40px;width:auto;border-radius:6px;border:1px solid var(--line)">
+          <label style="flex:1;margin-bottom:0">Logo image<input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><small>PNG, JPG or WebP. Shown next to your store name.</small></label>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn primary" id="logoSave">Upload logo</button>
+          <button class="btn ghost" id="logoRemove" hidden>Remove logo</button>
+        </div>
+      </div>
+      <div class="panel">
         <h2 id="pwTitle">Set admin password</h2>
         <p class="error" id="pwError" hidden></p>
         <label id="pwCurrentWrap" hidden>Current password<input id="pwCurrent" type="password" autocomplete="current-password"></label>
